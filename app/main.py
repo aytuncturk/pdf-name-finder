@@ -5,6 +5,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import JSONResponse
+from datetime import datetime
 import shutil
 import os
 import uuid
@@ -26,7 +28,7 @@ templates = Jinja2Templates(directory="templates")
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = 1024 * 1024 * 1024  # 1GB
 
 
 @app.get("/")
@@ -55,10 +57,16 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
     pdf.file.seek(0)
 
     if excel_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="Excel dosyası 50MB'dan büyük olamaz.")
+        raise HTTPException(
+            status_code=400,
+            detail="Excel dosyası 1GB'dan büyük olamaz."
+        )
 
     if pdf_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="PDF dosyası 50MB'dan büyük olamaz.")
+        raise HTTPException(
+            status_code=400,
+            detail="PDF dosyası 1GB'dan büyük olamaz."
+        )
 
     # Geçici dosya yolları
     excel_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.xlsx")
@@ -100,16 +108,19 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
             file_like,
             media_type="text/plain",
             headers={"Content-Disposition": "attachment; filename=sonuc.txt"}
-        )
+    )
 
-    finally:
-        # Temp dosyaları temizle
-        for path in [excel_path, pdf_path]:
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except:
-                    pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # finally:
+    #     # Temp dosyaları temizle
+    #     for path in [excel_path, pdf_path]:
+    #         if os.path.exists(path):
+    #             try:
+    #                 os.remove(path)
+    #             except:
+    #                 pass
 
 
 @app.exception_handler(RateLimitExceeded)

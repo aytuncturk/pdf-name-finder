@@ -127,18 +127,20 @@
         <div class="feature">⚡ Hızlı Sonuç</div>
     </div>
 
-    <form method="POST" action="/search" enctype="multipart/form-data" onsubmit="showLoading()">
+    <form id="uploadForm" enctype="multipart/form-data">
 
         <div class="upload-container">
 
             <div class="upload-box excel" onclick="document.getElementById('excel').click()">
                 <div style="font-size:40px;">📊</div>
                 <h3>Excel Dosyası (.xlsx)</h3>
+                <p id="excelName" style="margin-top:10px;font-size:14px;color:#1ea64a;"></p>
             </div>
 
             <div class="upload-box pdf" onclick="document.getElementById('pdf').click()">
                 <div style="font-size:40px;">📄</div>
                 <h3>PDF Dosyası (.pdf)</h3>
+                <p id="pdfName" style="margin-top:10px;font-size:14px;color:#e53935;"></p>
             </div>
 
         </div>
@@ -147,6 +149,17 @@
         <input type="file" id="pdf" name="pdf" hidden required>
 
         <button type="submit">Tara</button>
+
+        <div style="margin-top:15px;">
+  <div id="progressContainer" style="display:none;">
+    <div style="width:100%;background:#eee;border-radius:10px;">
+      <div id="progressBar" 
+           style="width:0%;height:12px;background:#6a5acd;border-radius:10px;">
+      </div>
+    </div>
+    <p id="progressText" style="font-size:14px;margin-top:5px;"></p>
+  </div>
+</div>
 
         <div class="loading" id="loadingText">
             İşleniyor... Lütfen bekleyin.
@@ -161,6 +174,75 @@
         document.getElementById("loadingText").style.display = "block";
     }
 </script>
+<script>
+document.getElementById("uploadForm").addEventListener("submit", function(e) {
+    e.preventDefault();
 
+    const form = document.getElementById("uploadForm");
+    const formData = new FormData(form);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/search", true);
+
+    const progressContainer = document.getElementById("progressContainer");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+
+    progressContainer.style.display = "block";
+
+    xhr.upload.onprogress = function(event) {
+        if (event.lengthComputable) {
+            const percent = (event.loaded / event.total) * 100;
+            progressBar.style.width = percent + "%";
+            progressText.innerText = Math.round(percent) + "% uploaded";
+        }
+    };
+
+    xhr.onload = function() {
+    if (xhr.status === 200) {
+        const blob = new Blob([xhr.response], { type: "text/plain" });
+        const link = document.createElement("a");
+        link.href = window.URL.createObjectURL(blob);
+        link.download = "sonuc.txt";
+        link.click();
+
+        progressText.innerText = "Processing complete.";
+        loadUploads();
+    } else {
+        progressText.innerText = "Upload failed.";
+    }
+};
+
+xhr.responseType = "blob";
+
+    xhr.send(formData);
+});
+</script>
+<script>
+function loadUploads() {
+    fetch("/uploads")
+    .then(res => res.json())
+    .then(data => {
+        const list = document.getElementById("uploadList");
+        list.innerHTML = "";
+        data.forEach(file => {
+            const li = document.createElement("li");
+            li.innerText = `${file.name} - ${file.size_mb} MB - ${file.uploaded_at}`;
+            list.appendChild(li);
+        });
+    });
+}
+
+window.onload = loadUploads;
+</script>
+<script>
+    document.getElementById("excel").addEventListener("change", function() {
+    document.getElementById("excelName").innerText = this.files[0].name;
+});
+
+document.getElementById("pdf").addEventListener("change", function() {
+    document.getElementById("pdfName").innerText = this.files[0].name;
+});
+</script>
 </body>
 </html>
