@@ -1,6 +1,8 @@
 import fitz
-from app.ocr_service import ocr_page, is_tesseract_available
+import re
 from app.utils import normalize_text
+from app.ocr_service import ocr_page, is_tesseract_available
+
 
 def extract_text_from_pdf(path: str, names: list):
     pages = {}
@@ -8,28 +10,25 @@ def extract_text_from_pdf(path: str, names: list):
 
     tesseract_available = is_tesseract_available()
 
-    normalized_names = [normalize_text(n) for n in names]
-
     for i, page in enumerate(doc):
         page_number = i + 1
-        text = page.get_text()
 
+        text = page.get_text()
         normalized_text = normalize_text(text)
 
-        # Eğer metin boşsa direkt OCR
+        # Sayfa boşsa OCR
         if not normalized_text.strip() and tesseract_available:
             text = ocr_page(page)
-            pages[page_number] = text
-            continue
 
-        # Eğer metin var ama hiçbir isim eşleşmiyorsa
-        if tesseract_available:
-            found = any(name in normalized_text for name in normalized_names)
-
-            if not found:
-                ocr_text = ocr_page(page)
-                text += "\n" + ocr_text
-
+        # TÜM SAYFALARI EKLE (fuzzy için gerekli)
         pages[page_number] = text
 
     return pages
+
+
+def extract_names_from_page(text: str):
+    """
+    (731) alanındaki isimleri yakalar.
+    """
+    matches = re.findall(r"\(731\).*?-\s*(.*?)\s*\(", text)
+    return [normalize_text(m) for m in matches]

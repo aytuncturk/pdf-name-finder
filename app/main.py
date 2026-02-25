@@ -89,18 +89,24 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
         # PDF extraction + OCR
         pages = extract_text_from_pdf(pdf_path, names)
 
-        # Arama
-        results = search_names_in_pages(names, pages)
+	        # Arama
+        exact, similar = search_names_in_pages(names, pages)
 
         # TXT içeriği RAM'de oluştur
-        output_content = ""
-        for name, page_list in results.items():
+        output_content = "TAM ESLESMELER\n"
+        output_content += "------------------\n"
+
+        for name, page_list in exact.items():
             if page_list:
                 pages_str = ", ".join(map(str, page_list))
                 output_content += f"{name} - {pages_str}\n"
 
-        if not output_content:
-            output_content = "Hiçbir eşleşme bulunamadı."
+        output_content += "\n\nBENZER ESLESMELER\n"
+        output_content += "------------------\n"
+
+        for name, matches in similar.items():
+            for page, score in matches:
+                output_content += f"{name} ~ sayfa {page} (benzerlik: %{int(score)})\n"
 
         file_like = io.BytesIO(output_content.encode("utf-8"))
 
@@ -108,11 +114,10 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
             file_like,
             media_type="text/plain",
             headers={"Content-Disposition": "attachment; filename=sonuc.txt"}
-    )
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
     # finally:
     #     # Temp dosyaları temizle
     #     for path in [excel_path, pdf_path]:

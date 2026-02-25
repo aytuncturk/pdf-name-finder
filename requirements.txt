@@ -10,3 +10,4 @@ pytesseract
 Pillow
 python-slugify
 slowapi
+rapidfuzz==3.6.1
