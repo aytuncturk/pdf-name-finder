@@ -1,3 +1,5 @@
+from zipfile import BadZipFile
+
 import pandas as pd
 from rapidfuzz import fuzz
 from app.utils import normalize_text
@@ -7,8 +9,23 @@ from app.pdf_service import extract_names_from_page
 FUZZY_THRESHOLD = 82
 
 
+class InvalidExcelFile(ValueError):
+    pass
+
+
 def read_names_from_excel(path: str):
-    df = pd.read_excel(path, header=None)
+    try:
+        df = pd.read_excel(path, header=None, engine="openpyxl")
+    except (ValueError, BadZipFile, KeyError, SyntaxError) as exc:
+        raise InvalidExcelFile from exc
+    except OSError as exc:
+        # openpyxl uses an untyped OSError for a missing workbook manifest entry.
+        if exc.args == ("File contains no valid workbook part",):
+            raise InvalidExcelFile from exc
+        raise
+
+    if df.empty:
+        return []
     return df.iloc[:, 0].dropna().astype(str).tolist()
 
 
