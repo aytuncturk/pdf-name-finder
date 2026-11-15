@@ -1,19 +1,20 @@
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+import io
+import logging
+import shutil
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import JSONResponse
-from datetime import datetime
-import shutil
-import os
-import uuid
-import io
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
-from app.pdf_service import extract_text_from_pdf
-from app.search_service import read_names_from_excel, search_names_in_pages
+from app.pdf_service import InvalidPDFFile, extract_text_from_pdf
+from app.search_service import InvalidExcelFile, read_names_from_excel, search_names_in_pages
 
 app = FastAPI()
 
@@ -25,15 +26,29 @@ app.state.limiter = limiter
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 1024 * 1024 * 1024  # 1GB
 
 
+@contextmanager
+def temporary_upload_directory():
+    directory = Path(tempfile.mkdtemp(prefix="pdf-name-finder-"))
+    try:
+        yield directory
+    finally:
+        try:
+            shutil.rmtree(directory)
+        except OSError as exc:
+            logger.error(
+                "Geçici yükleme klasörü temizlenemedi (klasör=%s, errno=%s).",
+                directory.name, exc.errno,
+            )
+
+
 @app.get("/")
 def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 
 @app.post("/search")
@@ -68,28 +83,22 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
             detail="PDF dosyası 1GB'dan büyük olamaz."
         )
 
-    # Geçici dosya yolları
-    excel_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.xlsx")
-    pdf_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.pdf")
-
     try:
-        # Dosyaları kaydet
-        with open(excel_path, "wb") as buffer:
-            shutil.copyfileobj(excel.file, buffer)
+        with temporary_upload_directory() as directory:
+            excel_path = directory / "input.xlsx"
+            pdf_path = directory / "input.pdf"
+            with excel.file, pdf.file:
+                with excel_path.open("wb") as buffer:
+                    shutil.copyfileobj(excel.file, buffer)
+                with pdf_path.open("wb") as buffer:
+                    shutil.copyfileobj(pdf.file, buffer)
 
-        with open(pdf_path, "wb") as buffer:
-            shutil.copyfileobj(pdf.file, buffer)
+            names = read_names_from_excel(str(excel_path))
+            if not names:
+                raise HTTPException(status_code=400, detail="Excel dosyasında isim bulunamadı.")
 
-        # Excel isimlerini oku
-        names = read_names_from_excel(excel_path)
+            pages = extract_text_from_pdf(str(pdf_path), names)
 
-        if not names:
-            raise HTTPException(status_code=400, detail="Excel dosyasında isim bulunamadı.")
-
-        # PDF extraction + OCR
-        pages = extract_text_from_pdf(pdf_path, names)
-
-	        # Arama
         exact, similar = search_names_in_pages(names, pages)
 
         # TXT içeriği RAM'de oluştur
@@ -116,16 +125,14 @@ async def search(request: Request, excel: UploadFile = File(...), pdf: UploadFil
             headers={"Content-Disposition": "attachment; filename=sonuc.txt"}
         )
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    # finally:
-    #     # Temp dosyaları temizle
-    #     for path in [excel_path, pdf_path]:
-    #         if os.path.exists(path):
-    #             try:
-    #                 os.remove(path)
-    #             except:
-    #                 pass
+    except HTTPException:
+        raise
+    except InvalidExcelFile as exc:
+        raise HTTPException(status_code=400, detail="Excel dosyası okunamadı.") from exc
+    except InvalidPDFFile as exc:
+        raise HTTPException(status_code=400, detail="PDF dosyası okunamadı.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Arama sırasında bir hata oluştu.") from exc
 
 
 @app.exception_handler(RateLimitExceeded)

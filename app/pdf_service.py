@@ -4,24 +4,32 @@ from app.utils import normalize_text
 from app.ocr_service import ocr_page, is_tesseract_available
 
 
+class InvalidPDFFile(ValueError):
+    pass
+
+
 def extract_text_from_pdf(path: str, names: list):
     pages = {}
-    doc = fitz.open(path)
+    try:
+        doc = fitz.open(path)
+    except (fitz.EmptyFileError, fitz.FileDataError) as exc:
+        raise InvalidPDFFile from exc
 
-    tesseract_available = is_tesseract_available()
+    with doc:
+        tesseract_available = is_tesseract_available()
 
-    for i, page in enumerate(doc):
-        page_number = i + 1
+        for i, page in enumerate(doc):
+            page_number = i + 1
 
-        text = page.get_text()
-        normalized_text = normalize_text(text)
+            text = page.get_text()
+            normalized_text = normalize_text(text)
 
-        # Sayfa boşsa OCR
-        if not normalized_text.strip() and tesseract_available:
-            text = ocr_page(page)
+            # Sayfa boşsa OCR
+            if not normalized_text.strip() and tesseract_available:
+                text = ocr_page(page)
 
-        # TÜM SAYFALARI EKLE (fuzzy için gerekli)
-        pages[page_number] = text
+            # TÜM SAYFALARI EKLE (fuzzy için gerekli)
+            pages[page_number] = text
 
     return pages
 
